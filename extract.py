@@ -7,7 +7,7 @@ evaluate.py imports this config to run GLiNER2.
 import re
 
 MODEL = "fastino/gliner2-base-v1"
-THRESHOLD = 0.25
+THRESHOLD = 0.2
 
 ENTITY_LABELS = {
     "patient_name": "Full name of a patient, e.g. 'Mary Johnson', 'John Smith'",
