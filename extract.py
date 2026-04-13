@@ -47,7 +47,7 @@ _LABELED_PATTERNS = [
     ("license_number", re.compile(r"DEA #:\s*(\S+)")),
 ]
 
-# Header patterns to extract known names
+# Header patterns for name extraction
 _PATIENT_HEADER_RE = re.compile(r"Patient:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)")
 _RE_PATIENT_RE = re.compile(r"RE:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)")
 
@@ -62,10 +62,9 @@ _PROVIDER_HEADER_PATTERNS = [
                r"(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)"),
     re.compile(r"From:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)"),
     re.compile(r"\n([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\b"),
-    re.compile(r"([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\s*—")
+    re.compile(r"([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\s*—"),
 ]
 
-# Words that should not be treated as names
 _COMMON_WORDS = {"No", "In", "An", "At", "On", "Of", "To", "As", "By", "Or", "If",
                  "Is", "It", "Be", "Do", "So", "Up", "He", "We", "Am", "My", "ED",
                  "MD", "RN", "PT", "Dr", "ER", "CT", "IV", "HR", "BP", "PO", "QD",
@@ -74,15 +73,21 @@ _COMMON_WORDS = {"No", "In", "An", "At", "On", "Of", "To", "As", "By", "Or", "If
                  "Out", "New", "Old", "One", "Two", "Per", "Day", "Yes", "Due",
                  "See", "Low", "Via", "Apt", "Lab", "Lot"}
 
-# Module-level text cache
 _current_text = ""
 
 
 def preprocess(text: str) -> str:
-    """Store text for regex fallbacks in postprocess."""
     global _current_text
     _current_text = text
     return text
+
+
+def _overlaps_same_label(start, end, label, entities):
+    """Check if a span overlaps with an existing entity of the same label."""
+    for e in entities:
+        if e["label"] == label and start < e["end"] and end > e["start"]:
+            return True
+    return False
 
 
 def _overlaps(start, end, entities):
@@ -94,43 +99,13 @@ def _overlaps(start, end, entities):
 
 
 def _find_all_occurrences(text, word):
-    """Find all occurrences of a word in text with word boundaries."""
     pattern = re.compile(r'\b' + re.escape(word) + r'\b')
     return [(m.start(), m.end()) for m in pattern.finditer(text)]
 
 
-def _extract_names_from_headers(text):
-    """Extract patient and provider name words from structured headers."""
-    patient_words = set()
-    provider_words = set()
-
-    # Patient from "Patient: FirstName LastName"
-    for m in _PATIENT_HEADER_RE.finditer(text):
-        for word in m.group(1).split():
-            if word not in _COMMON_WORDS and len(word) >= 2:
-                patient_words.add(word)
-
-    # Patient from "RE: FirstName LastName"
-    for m in _RE_PATIENT_RE.finditer(text):
-        for word in m.group(1).split():
-            if word not in _COMMON_WORDS and len(word) >= 2:
-                patient_words.add(word)
-
-    # Provider from header patterns
-    for pattern in _PROVIDER_HEADER_PATTERNS:
-        for m in pattern.finditer(text):
-            for word in m.group(1).split():
-                if word not in _COMMON_WORDS and len(word) >= 2:
-                    provider_words.add(word)
-
-    return patient_words, provider_words
-
-
 def postprocess(entities: list) -> list:
-    """Post-processing: regex fallbacks + name propagation."""
     global _current_text
     text = _current_text
-
     if not text:
         return entities
 
@@ -141,101 +116,61 @@ def postprocess(entities: list) -> list:
         for m in pattern.finditer(text):
             start, end = m.start(), m.end()
             if not _overlaps(start, end, result):
-                result.append({
-                    "text": m.group(),
-                    "label": label,
-                    "start": start,
-                    "end": end,
-                })
+                result.append({"text": m.group(), "label": label, "start": start, "end": end})
 
     # Step 2: Labeled value patterns
     for label, pattern in _LABELED_PATTERNS:
         for m in pattern.finditer(text):
             start, end = m.start(1), m.end(1)
             if not _overlaps(start, end, result):
-                result.append({
-                    "text": m.group(1),
-                    "label": label,
-                    "start": start,
-                    "end": end,
-                })
+                result.append({"text": m.group(1), "label": label, "start": start, "end": end})
 
-    # Step 3: Extract known names from headers
-    patient_words, provider_words = _extract_names_from_headers(text)
+    # Step 3: Extract known names from headers ONLY (not from GLiNER which may mislabel)
+    patient_words = set()
+    provider_words = set()
 
-    # Also add name words from GLiNER detections
-    for ent in entities:
-        if ent["label"] == "patient_name":
-            for word in ent["text"].split():
-                if word not in _COMMON_WORDS and len(word) >= 2:
-                    patient_words.add(word)
-        elif ent["label"] == "provider_name":
-            for word in ent["text"].split():
+    for m in _PATIENT_HEADER_RE.finditer(text):
+        for word in m.group(1).split():
+            if word not in _COMMON_WORDS and len(word) >= 2:
+                patient_words.add(word)
+
+    for m in _RE_PATIENT_RE.finditer(text):
+        for word in m.group(1).split():
+            if word not in _COMMON_WORDS and len(word) >= 2:
+                patient_words.add(word)
+
+    for pattern in _PROVIDER_HEADER_PATTERNS:
+        for m in pattern.finditer(text):
+            for word in m.group(1).split():
                 if word not in _COMMON_WORDS and len(word) >= 2:
                     provider_words.add(word)
 
-    # Words that appear in both patient and provider are ambiguous.
-    # Assign them based on context (check surrounding text for label clues).
-    shared_words = patient_words & provider_words
-
-    # Step 4: Propagate provider names first (they're the bigger gap)
+    # Step 4: For provider names, find all occurrences (use label-aware overlap)
     for word in provider_words:
-        if word in _COMMON_WORDS:
-            continue
-        label = "provider_name"
         for start, end in _find_all_occurrences(text, word):
-            if not _overlaps(start, end, result):
-                # For shared words, use context to decide
-                if word in shared_words:
-                    # Check if this occurrence is near a provider context marker
-                    context_before = text[max(0, start - 80):start]
-                    if any(kw in context_before for kw in
-                           ["Provider:", "Attending:", "Surgeon:", "Physician:",
-                            "Prescriber:", "Therapist:", "Nurse:", "signed:",
-                            "signed by", "From:", "Sincerely"]):
-                        label = "provider_name"
-                    else:
-                        label = "patient_name"
-                result.append({
-                    "text": word,
-                    "label": label,
-                    "start": start,
-                    "end": end,
-                })
+            if not _overlaps_same_label(start, end, "provider_name", result):
+                result.append({"text": word, "label": "provider_name", "start": start, "end": end})
 
-    # Step 5: Propagate patient names
+    # Step 5: For patient names, find all occurrences (use label-aware overlap)
     for word in patient_words:
-        if word in _COMMON_WORDS or word in provider_words:
-            continue  # Skip shared words (already handled above)
         for start, end in _find_all_occurrences(text, word):
-            if not _overlaps(start, end, result):
-                result.append({
-                    "text": word,
-                    "label": "patient_name",
-                    "start": start,
-                    "end": end,
-                })
+            if not _overlaps_same_label(start, end, "patient_name", result):
+                result.append({"text": word, "label": "patient_name", "start": start, "end": end})
 
-    # Step 6: Address patterns - extract from labeled lines and split components
+    # Step 6: Address patterns
     for m in re.finditer(r"(?:Address|Discharge address|Address on file):\s*(.+?)(?:\n|$)", text):
         addr_text = m.group(1).strip()
         addr_start = m.start(1)
-        # Try to split "Street, City, ST ZIPCODE"
         addr_m = re.match(r"(.+?),\s*(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$", addr_text)
         if addr_m:
             for g in range(1, 5):
                 part = addr_m.group(g)
                 s = addr_start + addr_m.start(g)
                 e = s + len(part)
-                if not _overlaps(s, e, result):
+                if not _overlaps_same_label(s, e, "address", result):
                     result.append({"text": part, "label": "address", "start": s, "end": e})
         else:
-            if not _overlaps(addr_start, addr_start + len(addr_text), result):
-                result.append({
-                    "text": addr_text,
-                    "label": "address",
-                    "start": addr_start,
-                    "end": addr_start + len(addr_text),
-                })
+            if not _overlaps_same_label(addr_start, addr_start + len(addr_text), "address", result):
+                result.append({"text": addr_text, "label": "address", "start": addr_start, "end": addr_start + len(addr_text)})
 
     return result
