@@ -7,7 +7,7 @@ evaluate.py imports this config to run GLiNER2.
 import re
 
 MODEL = "fastino/gliner2-base-v1"
-THRESHOLD = 0.3
+THRESHOLD = 0.25
 
 ENTITY_LABELS = {
     "patient_name": "Full name of a patient, e.g. 'Mary Johnson', 'John Smith'",
@@ -37,6 +37,15 @@ _REGEX_PATTERNS = [
     ("mrn", re.compile(r"\bMRN-\d{4,}\b")),
     ("account_number", re.compile(r"\bACCT-\d{4,}\b")),
     ("device_id", re.compile(r"\bSN-[A-Za-z]{4}-\d{8}\b")),
+    ("device_id", re.compile(r"\bSN-[A-Za-z]+-\d+\b")),
+    ("date", re.compile(r"\b\d{2}/\d{2}/\d{4}\b")),
+]
+
+# Labeled-value patterns: label prefix followed by the value we want to extract
+_LABELED_PATTERNS = [
+    ("health_plan_number", re.compile(r"Health Plan #:\s*(\S+)")),
+    ("license_number", re.compile(r"License #:\s*(\S+)")),
+    ("license_number", re.compile(r"DEA #:\s*(\S+)")),
 ]
 
 # Module-level text cache for passing text from preprocess to postprocess
@@ -74,6 +83,18 @@ def postprocess(entities: list) -> list:
             if not _overlaps(start, end, result):
                 result.append({
                     "text": m.group(),
+                    "label": label,
+                    "start": start,
+                    "end": end,
+                })
+
+    for label, pattern in _LABELED_PATTERNS:
+        for m in pattern.finditer(text):
+            # Extract the captured group (the value only)
+            start, end = m.start(1), m.end(1)
+            if not _overlaps(start, end, result):
+                result.append({
+                    "text": m.group(1),
                     "label": label,
                     "start": start,
                     "end": end,
