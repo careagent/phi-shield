@@ -12,7 +12,7 @@ from pathlib import Path
 
 from gliner2 import GLiNER2
 
-import extract
+import phi_shield
 
 FIXTURES_DIR = Path("fixtures")
 NOTES_PATH = FIXTURES_DIR / "notes.jsonl"
@@ -73,11 +73,11 @@ def run_evaluation():
     """Run the full evaluation pipeline."""
     notes, truths = load_fixtures()
 
-    print(f"Loading model: {extract.MODEL}", file=sys.stderr)
-    model = GLiNER2.from_pretrained(extract.MODEL)
+    print(f"Loading model: {phi_shield.MODEL}", file=sys.stderr)
+    model = GLiNER2.from_pretrained(phi_shield.MODEL)
 
-    labels = extract.ENTITY_LABELS
-    threshold = extract.THRESHOLD
+    labels = phi_shield.ENTITY_LABELS
+    threshold = phi_shield.THRESHOLD
 
     total_tp = 0
     total_fp = 0
@@ -87,7 +87,7 @@ def run_evaluation():
     start_time = time.time()
 
     for note, truth in zip(notes, truths):
-        text = extract.preprocess(note["text"])
+        text = phi_shield.preprocess(note["text"])
 
         result = model.extract_entities(
             text,
@@ -108,7 +108,7 @@ def run_evaluation():
                     "end": ent["end"],
                 })
 
-        predicted = extract.postprocess(predicted)
+        predicted = phi_shield.postprocess(predicted)
         ground_truth = truth["entities"]
         total_phi += len(ground_truth)
 

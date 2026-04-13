@@ -12,7 +12,7 @@ To set up a new experiment, work with the user to:
 3. **Read the in-scope files**: The repo is small. Read these files for full context:
    - `README.md` — repository context.
    - `evaluate.py` — fixed evaluation harness. Do not modify.
-   - `extract.py` — the file you modify. Entity labels, descriptions, thresholds, pre/post-processing.
+   - `phi_shield.py` — the file you modify. Entity labels, descriptions, thresholds, pre/post-processing.
    - `templates.py` — clinical note templates. Do not modify.
    - `prepare.py` — fixture generator. Do not modify.
 4. **Verify fixtures exist**: Check that `fixtures/notes.jsonl` and `fixtures/ground_truth.jsonl` exist. If not, tell the human to run `uv run prepare.py`.
@@ -26,7 +26,7 @@ Once you get confirmation, kick off the experimentation.
 Each experiment runs on CPU. You launch it simply as: `uv run evaluate.py`.
 
 **What you CAN do:**
-- Modify `extract.py` — this is the only file you edit. Everything is fair game: entity label names, descriptions, threshold, model selection, preprocessing, postprocessing.
+- Modify `phi_shield.py` — this is the only file you edit. Everything is fair game: entity label names, descriptions, threshold, model selection, preprocessing, postprocessing.
 
 **What you CANNOT do:**
 - Modify `evaluate.py`, `prepare.py`, `templates.py`, or anything in `fixtures/`.
@@ -98,7 +98,7 @@ The experiment runs on a dedicated branch (e.g. `autoresearch/apr12`).
 LOOP FOREVER:
 
 1. Look at the git state: the current branch/commit we're on
-2. Tune `extract.py` with an experimental idea.
+2. Tune `phi_shield.py` with an experimental idea.
 3. git commit
 4. Run the experiment: `uv run evaluate.py > run.log 2>&1`
 5. Read out the results: `grep "^recall:\|^precision:" run.log`
