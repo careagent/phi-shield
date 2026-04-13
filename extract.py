@@ -153,6 +153,14 @@ def postprocess(entities: list) -> list:
                 if word not in _COMMON_WORDS and len(word) >= 2:
                     provider_words.add(word)
 
+    # Also extract patient name words from GLiNER detections
+    for ent in entities:
+        if ent["label"] == "patient_name":
+            patient_full_names.add(ent["text"])
+            for word in ent["text"].split():
+                if word not in _COMMON_WORDS and len(word) >= 2:
+                    patient_words.add(word)
+
     # Step 4: Propagate provider full names AND individual words
     for name in provider_full_names:
         for start, end in _find_all_occurrences(text, name):
