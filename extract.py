@@ -91,7 +91,7 @@ def postprocess(entities: list) -> list:
     if not text:
         return entities
 
-    # Clean up GLiNER entities: strip title prefixes/suffixes from name entities
+    # Clean up GLiNER entities
     result = []
     for e in entities:
         if e["label"] in ("patient_name", "provider_name"):
@@ -107,6 +107,10 @@ def postprocess(entities: list) -> list:
                 end = s + len(t)
             if t != e["text"]:
                 e = dict(e, text=t, start=s, end=end)
+        elif e["label"] == "date":
+            # Filter out YYYY-MM-DD dates (template literals, not PHI)
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", e["text"]):
+                continue
         result.append(e)
 
     seen = set()
