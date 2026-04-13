@@ -133,32 +133,23 @@ def postprocess(entities: list) -> list:
         for m in pattern.finditer(text):
             _add_split(result, seen, m, 1, 2, "provider_name")
 
-    # Signature contexts — can be full name OR split depending on template
-    # Emit both forms; the evaluation will match the correct one
+    # Signature contexts — emit full name (most templates use {provider_name})
     _prov_sig = [
         re.compile(r"(?:Electronically signed|Signed|Signature|Death certificate completed by|"
                    r"Prescribing Physician Signature|Prescriber signature|"
-                   r"Surgeon|Attending):\s*(?:Dr\.\s*)?([A-Z][a-z]+)\s+([A-Z][a-z]+)"),
+                   r"Surgeon|Attending):\s*(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)"),
     ]
     for pattern in _prov_sig:
         for m in pattern.finditer(text):
-            # Full name
-            full = m.group(1) + " " + m.group(2)
-            _add(result, seen, full, "provider_name", m.start(1), m.end(2))
-            # Split
-            _add_split(result, seen, m, 1, 2, "provider_name")
+            _add(result, seen, m.group(1), "provider_name", m.start(1), m.end(1))
 
-    # "FirstName LastName, MD" on own line
-    for m in re.finditer(r"\n([A-Z][a-z]+)\s+([A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\b", text):
-        full = m.group(1) + " " + m.group(2)
-        _add(result, seen, full, "provider_name", m.start(1), m.end(2))
-        _add_split(result, seen, m, 1, 2, "provider_name")
+    # "FirstName LastName, MD" on own line — emit full name
+    for m in re.finditer(r"\n([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\b", text):
+        _add(result, seen, m.group(1), "provider_name", m.start(1), m.end(1))
 
-    # "FirstName LastName, MD —"
-    for m in re.finditer(r"([A-Z][a-z]+)\s+([A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\s*—", text):
-        full = m.group(1) + " " + m.group(2)
-        _add(result, seen, full, "provider_name", m.start(1), m.end(2))
-        _add_split(result, seen, m, 1, 2, "provider_name")
+    # "FirstName LastName, MD —" — emit full name
+    for m in re.finditer(r"([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\s*—", text):
+        _add(result, seen, m.group(1), "provider_name", m.start(1), m.end(1))
 
     # Step 4: Patient names
     # Full name from header
