@@ -29,8 +29,8 @@ ENTITY_LABELS = {
 # Regex patterns for structured PHI
 _REGEX_PATTERNS = [
     ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
-    ("phone_number", re.compile(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}")),
-    ("phone_number", re.compile(r"\d{3}\.\d{3}\.\d{4}")),
+    ("phone_number", re.compile(r"(?:\+?1[\-.]?)?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}(?:\s*(?:x|ext\.?)\s*\d+)?")),
+    ("phone_number", re.compile(r"(?:001[\-.]?)?\d{3}[\-.]?\d{3}[\-.]?\d{4}(?:\s*(?:x|ext\.?)\s*\d+)?")),
     ("email", re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")),
     ("ip_address", re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")),
     ("url", re.compile(r"https?://[^\s,;)>\]\"']+")),
@@ -116,7 +116,7 @@ def postprocess(entities: list) -> list:
     _prov_full = [
         re.compile(r"(?:Provider|Attending Physician|Ordering Provider|Consulting Physician|"
                    r"ED Physician|Submitting Physician|Prescriber|Ordering Physician|"
-                   r"Requesting Provider):\s*(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)"),
+                   r"Requesting Provider|Interpreting provider):\s*(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)"),
         re.compile(r"From:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)"),
         re.compile(r"Report transmitted to:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)"),
     ]
@@ -172,15 +172,25 @@ def postprocess(entities: list) -> list:
     for m in re.finditer(r"\n([A-Z][a-z]+)\s+([A-Z][a-z]+)\s+(?:is a|was a)\s", text):
         _add_split(result, seen, m, 1, 2, "patient_name")
 
-    # First name alone in narrative
-    for m in re.finditer(r"\n([A-Z][a-z]+)\s+(?:is a|reports?|presents?|has been)\s", text):
+    # First name alone in narrative (various trigger phrases)
+    for m in re.finditer(r"\n([A-Z][a-z]+)\s+(?:is a|is alert|reports?|presents?|has been|has a)\s", text):
         word = m.group(1)
         if word not in _COMMON_WORDS:
             _add(result, seen, word, "patient_name", m.start(1), m.end(1))
 
+    # "I am referring FirstName LastName" (referral letter)
+    for m in re.finditer(r"I am referring\s+([A-Z][a-z]+)\s+([A-Z][a-z]+)", text):
+        _add_split(result, seen, m, 1, 2, "patient_name")
+
     # "Thank you for your care of FirstName."
     for m in re.finditer(r"Thank you for your care of\s+([A-Z][a-z]+)\.", text):
         _add(result, seen, m.group(1), "patient_name", m.start(1), m.end(1))
+
+    # "Please feel free to contact me" then "Thank you for your care of" (referral pattern)
+    for m in re.finditer(r"care of\s+([A-Z][a-z]+)\b", text):
+        word = m.group(1)
+        if word not in _COMMON_WORDS:
+            _add(result, seen, word, "patient_name", m.start(1), m.end(1))
 
     # Step 5: Address patterns
     for m in re.finditer(r"(?:Address|Discharge address|Address on file):\s*(.+?)(?=\s{2,}|\n|$|Phone:|Email:|Health Plan)", text):
