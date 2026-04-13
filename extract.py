@@ -137,7 +137,7 @@ def postprocess(entities: list) -> list:
     # Signature contexts — can be full name OR split depending on template
     # Emit both forms; the evaluation will match the correct one
     _prov_sig = [
-        re.compile(r"(?:Electronically signed|Signed|Death certificate completed by|"
+        re.compile(r"(?:Electronically signed|Signed|Signature|Death certificate completed by|"
                    r"Prescribing Physician Signature|Prescriber signature|"
                    r"Surgeon|Attending):\s*(?:Dr\.\s*)?([A-Z][a-z]+)\s+([A-Z][a-z]+)"),
     ]
