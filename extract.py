@@ -181,20 +181,22 @@ def postprocess(entities: list) -> list:
             if not _overlaps_same_label(start, end, "patient_name", result):
                 result.append({"text": word, "label": "patient_name", "start": start, "end": end})
 
-    # Step 6: Address patterns
+    # Step 6: Address patterns - emit BOTH full address and components
+    # Some ground truth entries use full address, others use individual components
     for m in re.finditer(r"(?:Address|Discharge address|Address on file):\s*(.+?)(?:\n|$)", text):
         addr_text = m.group(1).strip()
         addr_start = m.start(1)
+
+        # Always emit full address
+        result.append({"text": addr_text, "label": "address", "start": addr_start, "end": addr_start + len(addr_text)})
+
+        # Also try to split into components
         addr_m = re.match(r"(.+?),\s*(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$", addr_text)
         if addr_m:
             for g in range(1, 5):
                 part = addr_m.group(g)
                 s = addr_start + addr_m.start(g)
                 e = s + len(part)
-                if not _overlaps_same_label(s, e, "address", result):
-                    result.append({"text": part, "label": "address", "start": s, "end": e})
-        else:
-            if not _overlaps_same_label(addr_start, addr_start + len(addr_text), "address", result):
-                result.append({"text": addr_text, "label": "address", "start": addr_start, "end": addr_start + len(addr_text)})
+                result.append({"text": part, "label": "address", "start": s, "end": e})
 
     return result
