@@ -91,14 +91,22 @@ def postprocess(entities: list) -> list:
     if not text:
         return entities
 
-    # Clean up GLiNER entities: strip title suffixes from name entities
+    # Clean up GLiNER entities: strip title prefixes/suffixes from name entities
     result = []
     for e in entities:
         if e["label"] in ("patient_name", "provider_name"):
-            # Strip ", MD", ", RN", ", PT", ", DPT", ", LCSW", ", DO" from end
-            cleaned = re.sub(r",\s*(?:MD|RN|PT|DPT|LCSW|DO)\s*$", "", e["text"])
-            if cleaned != e["text"]:
-                e = dict(e, text=cleaned, end=e["start"] + len(cleaned))
+            t, s, end = e["text"], e["start"], e["end"]
+            # Strip "Dr. " prefix
+            if t.startswith("Dr. "):
+                t = t[4:]
+                s += 4
+            # Strip ", MD" etc. suffix
+            m = re.search(r",\s*(?:MD|RN|PT|DPT|LCSW|DO)\s*$", t)
+            if m:
+                t = t[:m.start()]
+                end = s + len(t)
+            if t != e["text"]:
+                e = dict(e, text=t, start=s, end=end)
         result.append(e)
 
     seen = set()
