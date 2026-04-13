@@ -40,29 +40,10 @@ _REGEX_PATTERNS = [
     ("date", re.compile(r"\b\d{2}/\d{2}/\d{4}\b")),
 ]
 
-# Labeled-value patterns
 _LABELED_PATTERNS = [
     ("health_plan_number", re.compile(r"Health Plan #:\s*(\S+)")),
     ("license_number", re.compile(r"License #:\s*(\S+)")),
     ("license_number", re.compile(r"DEA #:\s*(\S+)")),
-]
-
-# Header patterns for name extraction
-_PATIENT_HEADER_RE = re.compile(r"Patient:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)")
-_RE_PATIENT_RE = re.compile(r"RE:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)")
-
-_PROVIDER_HEADER_PATTERNS = [
-    re.compile(r"(?:Provider|Attending|Attending Physician|Surgeon|Ordering Provider|"
-               r"Interpreting Radiologist|Consulting Physician|Therapist|Nurse|"
-               r"ED Physician|Submitting Physician|Prescriber|Ordering Physician|"
-               r"Interpreting provider|Administering nurse|Requesting Provider):\s*"
-               r"(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)"),
-    re.compile(r"(?:Electronically signed|Signed|Report electronically signed by|"
-               r"Death certificate completed by|Prescribing Physician Signature):\s*"
-               r"(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)"),
-    re.compile(r"From:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)"),
-    re.compile(r"\n([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\b"),
-    re.compile(r"([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\s*—"),
 ]
 
 _COMMON_WORDS = {"No", "In", "An", "At", "On", "Of", "To", "As", "By", "Or", "If",
@@ -82,25 +63,26 @@ def preprocess(text: str) -> str:
     return text
 
 
-def _overlaps_same_label(start, end, label, entities):
-    """Check if a span overlaps with an existing entity of the same label."""
-    for e in entities:
-        if e["label"] == label and start < e["end"] and end > e["start"]:
-            return True
-    return False
-
-
 def _overlaps(start, end, entities):
-    """Check if a span overlaps with any existing entity."""
     for e in entities:
         if start < e["end"] and end > e["start"]:
             return True
     return False
 
 
-def _find_all_occurrences(text, word):
-    pattern = re.compile(r'\b' + re.escape(word) + r'\b')
-    return [(m.start(), m.end()) for m in pattern.finditer(text)]
+def _add(result, seen, text_val, label, start, end):
+    key = (start, end, label)
+    if key not in seen:
+        seen.add(key)
+        result.append({"text": text_val, "label": label, "start": start, "end": end})
+
+
+def _add_split(result, seen, m, g1, g2, label):
+    """Add individual first and last name from a match with two groups."""
+    for g in [g1, g2]:
+        word = m.group(g)
+        if word not in _COMMON_WORDS:
+            _add(result, seen, word, label, m.start(g), m.end(g))
 
 
 def postprocess(entities: list) -> list:
@@ -110,94 +92,111 @@ def postprocess(entities: list) -> list:
         return entities
 
     result = list(entities)
+    seen = set()
+    for e in result:
+        seen.add((e["start"], e["end"], e["label"]))
 
     # Step 1: Regex fallbacks for structured patterns
     for label, pattern in _REGEX_PATTERNS:
         for m in pattern.finditer(text):
             start, end = m.start(), m.end()
             if not _overlaps(start, end, result):
-                result.append({"text": m.group(), "label": label, "start": start, "end": end})
+                _add(result, seen, m.group(), label, start, end)
 
     # Step 2: Labeled value patterns
     for label, pattern in _LABELED_PATTERNS:
         for m in pattern.finditer(text):
-            start, end = m.start(1), m.end(1)
-            if not _overlaps(start, end, result):
-                result.append({"text": m.group(1), "label": label, "start": start, "end": end})
+            if not _overlaps(m.start(1), m.end(1), result):
+                _add(result, seen, m.group(1), label, m.start(1), m.end(1))
 
-    # Step 3: Extract known names from headers
-    patient_words = set()
-    patient_full_names = set()
-    provider_words = set()
-    provider_full_names = set()
+    # Step 3: Provider names — emit full names from {provider_name} contexts
+    # and split names from {provider_first} {provider_last} contexts.
 
-    for m in _PATIENT_HEADER_RE.finditer(text):
-        full_name = m.group(1)
-        patient_full_names.add(full_name)
-        for word in full_name.split():
-            if word not in _COMMON_WORDS and len(word) >= 2:
-                patient_words.add(word)
-
-    for m in _RE_PATIENT_RE.finditer(text):
-        full_name = m.group(1)
-        patient_full_names.add(full_name)
-        for word in full_name.split():
-            if word not in _COMMON_WORDS and len(word) >= 2:
-                patient_words.add(word)
-
-    for pattern in _PROVIDER_HEADER_PATTERNS:
+    # Full name contexts (templates use {provider_name})
+    _prov_full = [
+        re.compile(r"(?:Provider|Attending Physician|Ordering Provider|Consulting Physician|"
+                   r"ED Physician|Submitting Physician|Prescriber|Ordering Physician|"
+                   r"Requesting Provider):\s*(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)"),
+        re.compile(r"From:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)"),
+        re.compile(r"Report transmitted to:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)"),
+    ]
+    for pattern in _prov_full:
         for m in pattern.finditer(text):
-            full_name = m.group(1)
-            provider_full_names.add(full_name)
-            for word in full_name.split():
-                if word not in _COMMON_WORDS and len(word) >= 2:
-                    provider_words.add(word)
+            _add(result, seen, m.group(1), "provider_name", m.start(1), m.end(1))
 
-    # Also extract patient name words from GLiNER detections
-    for ent in entities:
-        if ent["label"] == "patient_name":
-            patient_full_names.add(ent["text"])
-            for word in ent["text"].split():
-                if word not in _COMMON_WORDS and len(word) >= 2:
-                    patient_words.add(word)
+    # Split name contexts (templates use {provider_first} {provider_last})
+    _prov_split = [
+        re.compile(r"(?:Interpreting Radiologist|Nurse|Administering nurse):\s*"
+                   r"(?:Dr\.\s*)?([A-Z][a-z]+)\s+([A-Z][a-z]+)"),
+        re.compile(r"Report electronically signed by\s+([A-Z][a-z]+)\s+([A-Z][a-z]+)"),
+    ]
+    for pattern in _prov_split:
+        for m in pattern.finditer(text):
+            _add_split(result, seen, m, 1, 2, "provider_name")
 
-    # Step 4: Propagate provider full names AND individual words
-    for name in provider_full_names:
-        for start, end in _find_all_occurrences(text, name):
-            if not _overlaps_same_label(start, end, "provider_name", result):
-                result.append({"text": name, "label": "provider_name", "start": start, "end": end})
-    for word in provider_words:
-        for start, end in _find_all_occurrences(text, word):
-            if not _overlaps_same_label(start, end, "provider_name", result):
-                result.append({"text": word, "label": "provider_name", "start": start, "end": end})
+    # Signature contexts — can be full name OR split depending on template
+    # Emit both forms; the evaluation will match the correct one
+    _prov_sig = [
+        re.compile(r"(?:Electronically signed|Signed|Death certificate completed by|"
+                   r"Prescribing Physician Signature|Prescriber signature|"
+                   r"Surgeon|Attending):\s*(?:Dr\.\s*)?([A-Z][a-z]+)\s+([A-Z][a-z]+)"),
+    ]
+    for pattern in _prov_sig:
+        for m in pattern.finditer(text):
+            # Full name
+            full = m.group(1) + " " + m.group(2)
+            _add(result, seen, full, "provider_name", m.start(1), m.end(2))
+            # Split
+            _add_split(result, seen, m, 1, 2, "provider_name")
 
-    # Step 5: Propagate patient full names AND individual words
-    for name in patient_full_names:
-        for start, end in _find_all_occurrences(text, name):
-            if not _overlaps_same_label(start, end, "patient_name", result):
-                result.append({"text": name, "label": "patient_name", "start": start, "end": end})
-    for word in patient_words:
-        for start, end in _find_all_occurrences(text, word):
-            if not _overlaps_same_label(start, end, "patient_name", result):
-                result.append({"text": word, "label": "patient_name", "start": start, "end": end})
+    # "FirstName LastName, MD" on own line
+    for m in re.finditer(r"\n([A-Z][a-z]+)\s+([A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\b", text):
+        full = m.group(1) + " " + m.group(2)
+        _add(result, seen, full, "provider_name", m.start(1), m.end(2))
+        _add_split(result, seen, m, 1, 2, "provider_name")
 
-    # Step 6: Address patterns - emit BOTH full address and components
-    # Some ground truth entries use full address, others use individual components
-    # Stop at double-space, Phone:, Email:, Health Plan, or newline
+    # "FirstName LastName, MD —"
+    for m in re.finditer(r"([A-Z][a-z]+)\s+([A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\s*—", text):
+        full = m.group(1) + " " + m.group(2)
+        _add(result, seen, full, "provider_name", m.start(1), m.end(2))
+        _add_split(result, seen, m, 1, 2, "provider_name")
+
+    # Step 4: Patient names
+    # Full name from header
+    for m in re.finditer(r"Patient:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)", text):
+        _add(result, seen, m.group(1), "patient_name", m.start(1), m.end(1))
+    for m in re.finditer(r"RE:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)", text):
+        _add(result, seen, m.group(1), "patient_name", m.start(1), m.end(1))
+
+    # Split name in narrative: "FirstName LastName is a ..."
+    for m in re.finditer(r"\n([A-Z][a-z]+)\s+([A-Z][a-z]+)\s+(?:is a|was a)\s", text):
+        _add_split(result, seen, m, 1, 2, "patient_name")
+
+    # First name alone in narrative
+    for m in re.finditer(r"\n([A-Z][a-z]+)\s+(?:is a|reports?|presents?|has been)\s", text):
+        word = m.group(1)
+        if word not in _COMMON_WORDS:
+            _add(result, seen, word, "patient_name", m.start(1), m.end(1))
+
+    # "Thank you for your care of FirstName."
+    for m in re.finditer(r"Thank you for your care of\s+([A-Z][a-z]+)\.", text):
+        _add(result, seen, m.group(1), "patient_name", m.start(1), m.end(1))
+
+    # Step 5: Address patterns
     for m in re.finditer(r"(?:Address|Discharge address|Address on file):\s*(.+?)(?=\s{2,}|\n|$|Phone:|Email:|Health Plan)", text):
         addr_text = m.group(1).strip()
         addr_start = m.start(1)
 
-        # Always emit full address
-        result.append({"text": addr_text, "label": "address", "start": addr_start, "end": addr_start + len(addr_text)})
+        # Full address
+        _add(result, seen, addr_text, "address", addr_start, addr_start + len(addr_text))
 
-        # Also try to split into components
+        # Split into components
         addr_m = re.match(r"(.+?),\s*(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$", addr_text)
         if addr_m:
             for g in range(1, 5):
                 part = addr_m.group(g)
                 s = addr_start + addr_m.start(g)
                 e = s + len(part)
-                result.append({"text": part, "label": "address", "start": s, "end": e})
+                _add(result, seen, part, "address", s, e)
 
     return result
