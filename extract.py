@@ -183,7 +183,8 @@ def postprocess(entities: list) -> list:
 
     # Step 6: Address patterns - emit BOTH full address and components
     # Some ground truth entries use full address, others use individual components
-    for m in re.finditer(r"(?:Address|Discharge address|Address on file):\s*(.+?)(?:\n|$)", text):
+    # Stop at double-space, Phone:, Email:, Health Plan, or newline
+    for m in re.finditer(r"(?:Address|Discharge address|Address on file):\s*(.+?)(?=\s{2,}|\n|$|Phone:|Email:|Health Plan)", text):
         addr_text = m.group(1).strip()
         addr_start = m.start(1)
 
