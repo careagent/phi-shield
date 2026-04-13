@@ -11,6 +11,9 @@ dependencies = [
     "pytesseract>=0.3.13",
     "pillow>=12.2.0",
     "pypdf>=6.10.0",
+    "fastapi>=0.135.3",
+    "uvicorn>=0.44.0",
+    "python-multipart>=0.0.26",
 ]
 
 [tool.uv]
