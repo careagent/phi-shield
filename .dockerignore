@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+fixtures/
+results.tsv
+run.log
+models/
+tests/
+*.pyc
+.git/
