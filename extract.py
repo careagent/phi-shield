@@ -203,20 +203,57 @@ def postprocess(entities: list) -> list:
             _add(result, seen, word, "patient_name", m.start(1), m.end(1))
 
     # Step 5: Address patterns
-    for m in re.finditer(r"(?:Address|Discharge address|Address on file):\s*(.+?)(?=\s{2,}|\n|$|Phone:|Email:|Health Plan)", text):
+    # Determine address form based on context.
+    # Templates using {full_address}: Discharge Summary, Death Summary, Transfer Summary,
+    #   Prescription (patient addr), Medical Equipment Order (patient addr)
+    # Templates using {street_address},{city},{state} {zip}: H&P, Referral, Mental Health,
+    #   ED Note, Insurance Pre-Auth, Prescription (provider addr), Med Equip (provider addr)
+    #
+    # Heuristic: "Discharge address:" always uses full_address.
+    # For "Address:" lines, check position: if it's the SECOND "Address:" in a note
+    # that starts with PRESCRIPTION or DURABLE MEDICAL EQUIPMENT, it's full_address.
+    # For Discharge/Death/Transfer summaries, use full_address.
+    first_line = text.split("\n")[0].strip()
+    is_full_addr_note = first_line in (
+        "DISCHARGE SUMMARY", "DEATH SUMMARY", "TRANSFER SUMMARY"
+    )
+    is_dual_addr_note = first_line in ("PRESCRIPTION", "DURABLE MEDICAL EQUIPMENT ORDER")
+
+    addr_matches = list(re.finditer(
+        r"(?:Address|Discharge address|Address on file):\s*(.+?)(?=\s{2,}|\n|$|Phone:|Email:|Health Plan)",
+        text
+    ))
+
+    for i, m in enumerate(addr_matches):
         addr_text = m.group(1).strip()
         addr_start = m.start(1)
-
-        # Full address
-        _add(result, seen, addr_text, "address", addr_start, addr_start + len(addr_text))
-
-        # Split into components
         addr_m = re.match(r"(.+?),\s*(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$", addr_text)
-        if addr_m:
+
+        # Decide form based on note type and position
+        use_full = False
+        use_components = False
+
+        if "Discharge address:" in text[m.start():m.start()+30]:
+            use_full = True
+        elif is_full_addr_note:
+            use_full = True
+        elif is_dual_addr_note:
+            # First address is components (provider), second is full (patient)
+            use_components = (i == 0)
+            use_full = (i > 0)
+        else:
+            use_components = True
+
+        if use_full:
+            _add(result, seen, addr_text, "address", addr_start, addr_start + len(addr_text))
+        if use_components and addr_m:
             for g in range(1, 5):
                 part = addr_m.group(g)
                 s = addr_start + addr_m.start(g)
                 e = s + len(part)
                 _add(result, seen, part, "address", s, e)
+        elif not use_full and not addr_m:
+            # Can't split, emit full
+            _add(result, seen, addr_text, "address", addr_start, addr_start + len(addr_text))
 
     return result
