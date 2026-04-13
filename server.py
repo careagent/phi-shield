@@ -31,10 +31,12 @@ def _check_auth(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-def _detect_phi(text: str) -> list:
-    """Run GLiNER2 + phi_shield pre/post processing."""
-    phi_shield.preprocess(text)
+_CHUNK_SIZE = 1500  # characters per chunk
+_CHUNK_OVERLAP = 200  # overlap to catch entities at boundaries
 
+
+def _detect_phi_chunk(text: str) -> list:
+    """Run GLiNER2 on a single chunk of text."""
     result = _model.extract_entities(
         text,
         phi_shield.ENTITY_LABELS,
@@ -43,7 +45,6 @@ def _detect_phi(text: str) -> list:
         include_confidence=True,
     )
 
-    # Flatten result dict into list of entities
     predicted = []
     for label, ents in result.get("entities", {}).items():
         for ent in ents:
@@ -53,6 +54,40 @@ def _detect_phi(text: str) -> list:
                 "start": ent["start"],
                 "end": ent["end"],
             })
+    return predicted
+
+
+def _detect_phi(text: str) -> list:
+    """Run GLiNER2 + phi_shield pre/post processing, chunking long texts."""
+    phi_shield.preprocess(text)
+
+    if len(text) <= _CHUNK_SIZE:
+        predicted = _detect_phi_chunk(text)
+    else:
+        # Split into overlapping chunks, deduplicate results
+        predicted = []
+        seen = set()
+        start = 0
+        while start < len(text):
+            end = min(start + _CHUNK_SIZE, len(text))
+            chunk = text[start:end]
+            chunk_entities = _detect_phi_chunk(chunk)
+
+            for e in chunk_entities:
+                # Adjust positions to full-text coordinates
+                abs_start = e["start"] + start
+                abs_end = e["end"] + start
+                key = (abs_start, abs_end, e["label"])
+                if key not in seen:
+                    seen.add(key)
+                    predicted.append({
+                        "text": e["text"],
+                        "label": e["label"],
+                        "start": abs_start,
+                        "end": abs_end,
+                    })
+
+            start += _CHUNK_SIZE - _CHUNK_OVERLAP
 
     return phi_shield.postprocess(predicted)
 
