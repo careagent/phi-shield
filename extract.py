@@ -103,11 +103,10 @@ def postprocess(entities: list) -> list:
             if not _overlaps(start, end, result):
                 _add(result, seen, m.group(), label, start, end)
 
-    # Step 2: Labeled value patterns
+    # Step 2: Labeled value patterns (always add, regardless of overlaps)
     for label, pattern in _LABELED_PATTERNS:
         for m in pattern.finditer(text):
-            if not _overlaps(m.start(1), m.end(1), result):
-                _add(result, seen, m.group(1), label, m.start(1), m.end(1))
+            _add(result, seen, m.group(1), label, m.start(1), m.end(1))
 
     # Step 3: Provider names — emit full names from {provider_name} contexts
     # and split names from {provider_first} {provider_last} contexts.
