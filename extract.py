@@ -125,33 +125,49 @@ def postprocess(entities: list) -> list:
             if not _overlaps(start, end, result):
                 result.append({"text": m.group(1), "label": label, "start": start, "end": end})
 
-    # Step 3: Extract known names from headers ONLY (not from GLiNER which may mislabel)
+    # Step 3: Extract known names from headers
     patient_words = set()
+    patient_full_names = set()
     provider_words = set()
+    provider_full_names = set()
 
     for m in _PATIENT_HEADER_RE.finditer(text):
-        for word in m.group(1).split():
+        full_name = m.group(1)
+        patient_full_names.add(full_name)
+        for word in full_name.split():
             if word not in _COMMON_WORDS and len(word) >= 2:
                 patient_words.add(word)
 
     for m in _RE_PATIENT_RE.finditer(text):
-        for word in m.group(1).split():
+        full_name = m.group(1)
+        patient_full_names.add(full_name)
+        for word in full_name.split():
             if word not in _COMMON_WORDS and len(word) >= 2:
                 patient_words.add(word)
 
     for pattern in _PROVIDER_HEADER_PATTERNS:
         for m in pattern.finditer(text):
-            for word in m.group(1).split():
+            full_name = m.group(1)
+            provider_full_names.add(full_name)
+            for word in full_name.split():
                 if word not in _COMMON_WORDS and len(word) >= 2:
                     provider_words.add(word)
 
-    # Step 4: For provider names, find all occurrences (use label-aware overlap)
+    # Step 4: Propagate provider full names AND individual words
+    for name in provider_full_names:
+        for start, end in _find_all_occurrences(text, name):
+            if not _overlaps_same_label(start, end, "provider_name", result):
+                result.append({"text": name, "label": "provider_name", "start": start, "end": end})
     for word in provider_words:
         for start, end in _find_all_occurrences(text, word):
             if not _overlaps_same_label(start, end, "provider_name", result):
                 result.append({"text": word, "label": "provider_name", "start": start, "end": end})
 
-    # Step 5: For patient names, find all occurrences (use label-aware overlap)
+    # Step 5: Propagate patient full names AND individual words
+    for name in patient_full_names:
+        for start, end in _find_all_occurrences(text, name):
+            if not _overlaps_same_label(start, end, "patient_name", result):
+                result.append({"text": name, "label": "patient_name", "start": start, "end": end})
     for word in patient_words:
         for start, end in _find_all_occurrences(text, word):
             if not _overlaps_same_label(start, end, "patient_name", result):
