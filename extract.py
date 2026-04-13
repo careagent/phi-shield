@@ -49,6 +49,8 @@ _LABELED_PATTERNS = [
 
 # Header patterns to extract known names
 _PATIENT_HEADER_RE = re.compile(r"Patient:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)")
+_RE_PATIENT_RE = re.compile(r"RE:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)")
+
 _PROVIDER_HEADER_PATTERNS = [
     re.compile(r"(?:Provider|Attending|Attending Physician|Surgeon|Ordering Provider|"
                r"Interpreting Radiologist|Consulting Physician|Therapist|Nurse|"
@@ -60,7 +62,17 @@ _PROVIDER_HEADER_PATTERNS = [
                r"(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)"),
     re.compile(r"From:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)"),
     re.compile(r"\n([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\b"),
+    re.compile(r"— (?:Nephrology|Cardiology|Oncology)\n"),  # won't match names but placeholder
 ]
+
+# Words that should not be treated as names
+_COMMON_WORDS = {"No", "In", "An", "At", "On", "Of", "To", "As", "By", "Or", "If",
+                 "Is", "It", "Be", "Do", "So", "Up", "He", "We", "Am", "My", "ED",
+                 "MD", "RN", "PT", "Dr", "ER", "CT", "IV", "HR", "BP", "PO", "QD",
+                 "BID", "TID", "PRN", "The", "For", "And", "Not", "But", "All",
+                 "Has", "Had", "Was", "Are", "May", "Can", "She", "His", "Her",
+                 "Out", "New", "Old", "One", "Two", "Per", "Day", "Yes", "Due",
+                 "See", "Low", "Via", "Apt", "Lab", "Lot"}
 
 # Module-level text cache
 _current_text = ""
@@ -85,6 +97,33 @@ def _find_all_occurrences(text, word):
     """Find all occurrences of a word in text with word boundaries."""
     pattern = re.compile(r'\b' + re.escape(word) + r'\b')
     return [(m.start(), m.end()) for m in pattern.finditer(text)]
+
+
+def _extract_names_from_headers(text):
+    """Extract patient and provider name words from structured headers."""
+    patient_words = set()
+    provider_words = set()
+
+    # Patient from "Patient: FirstName LastName"
+    for m in _PATIENT_HEADER_RE.finditer(text):
+        for word in m.group(1).split():
+            if word not in _COMMON_WORDS and len(word) >= 2:
+                patient_words.add(word)
+
+    # Patient from "RE: FirstName LastName"
+    for m in _RE_PATIENT_RE.finditer(text):
+        for word in m.group(1).split():
+            if word not in _COMMON_WORDS and len(word) >= 2:
+                patient_words.add(word)
+
+    # Provider from header patterns
+    for pattern in _PROVIDER_HEADER_PATTERNS:
+        for m in pattern.finditer(text):
+            for word in m.group(1).split():
+                if word not in _COMMON_WORDS and len(word) >= 2:
+                    provider_words.add(word)
+
+    return patient_words, provider_words
 
 
 def postprocess(entities: list) -> list:
@@ -121,75 +160,67 @@ def postprocess(entities: list) -> list:
                     "end": end,
                 })
 
-    # Step 3: Extract known patient and provider names from headers
-    patient_names = set()
-    provider_names = set()
+    # Step 3: Extract known names from headers
+    patient_words, provider_words = _extract_names_from_headers(text)
 
-    # From header "Patient: FirstName LastName"
-    for m in _PATIENT_HEADER_RE.finditer(text):
-        full = m.group(1)
-        patient_names.add(full)
-        for word in full.split():
-            patient_names.add(word)
-
-    # From provider header patterns
-    for pattern in _PROVIDER_HEADER_PATTERNS:
-        for m in pattern.finditer(text):
-            full = m.group(1)
-            provider_names.add(full)
-            for word in full.split():
-                provider_names.add(word)
-
-    # Also extract names from GLiNER detections
+    # Also add name words from GLiNER detections
     for ent in entities:
         if ent["label"] == "patient_name":
-            patient_names.add(ent["text"])
             for word in ent["text"].split():
-                if len(word) >= 2:
-                    patient_names.add(word)
+                if word not in _COMMON_WORDS and len(word) >= 2:
+                    patient_words.add(word)
         elif ent["label"] == "provider_name":
-            provider_names.add(ent["text"])
             for word in ent["text"].split():
-                if len(word) >= 2:
-                    provider_names.add(word)
+                if word not in _COMMON_WORDS and len(word) >= 2:
+                    provider_words.add(word)
 
-    # Remove words that are too common to be names (avoid false positives)
-    common_words = {"No", "In", "An", "At", "On", "Of", "To", "As", "By", "Or", "If",
-                    "Is", "It", "Be", "Do", "So", "Up", "He", "We", "Am", "My", "ED",
-                    "MD", "RN", "PT", "Dr", "ER", "CT", "IV", "HR", "BP", "PO", "QD",
-                    "BID", "TID", "PRN"}
+    # Words that appear in both patient and provider are ambiguous.
+    # Assign them based on context (check surrounding text for label clues).
+    shared_words = patient_words & provider_words
 
-    # Step 4: Find all occurrences of known names in the text
-    # For patient names - find individual first/last name words
-    for name in patient_names:
-        if name in common_words or len(name) < 2:
+    # Step 4: Propagate provider names first (they're the bigger gap)
+    for word in provider_words:
+        if word in _COMMON_WORDS:
             continue
-        for start, end in _find_all_occurrences(text, name):
+        label = "provider_name"
+        for start, end in _find_all_occurrences(text, word):
+            if not _overlaps(start, end, result):
+                # For shared words, use context to decide
+                if word in shared_words:
+                    # Check if this occurrence is near a provider context marker
+                    context_before = text[max(0, start - 80):start]
+                    if any(kw in context_before for kw in
+                           ["Provider:", "Attending:", "Surgeon:", "Physician:",
+                            "Prescriber:", "Therapist:", "Nurse:", "signed:",
+                            "signed by", "From:", "Sincerely"]):
+                        label = "provider_name"
+                    else:
+                        label = "patient_name"
+                result.append({
+                    "text": word,
+                    "label": label,
+                    "start": start,
+                    "end": end,
+                })
+
+    # Step 5: Propagate patient names
+    for word in patient_words:
+        if word in _COMMON_WORDS or word in provider_words:
+            continue  # Skip shared words (already handled above)
+        for start, end in _find_all_occurrences(text, word):
             if not _overlaps(start, end, result):
                 result.append({
-                    "text": name,
+                    "text": word,
                     "label": "patient_name",
                     "start": start,
                     "end": end,
                 })
 
-    for name in provider_names:
-        if name in common_words or len(name) < 2:
-            continue
-        for start, end in _find_all_occurrences(text, name):
-            if not _overlaps(start, end, result):
-                result.append({
-                    "text": name,
-                    "label": "provider_name",
-                    "start": start,
-                    "end": end,
-                })
-
-    # Step 5: Address patterns - extract from "Address:" lines
+    # Step 6: Address patterns - extract from labeled lines and split components
     for m in re.finditer(r"(?:Address|Discharge address|Address on file):\s*(.+?)(?:\n|$)", text):
         addr_text = m.group(1).strip()
         addr_start = m.start(1)
-        # Try to split into components
+        # Try to split "Street, City, ST ZIPCODE"
         addr_m = re.match(r"(.+?),\s*(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$", addr_text)
         if addr_m:
             for g in range(1, 5):
