@@ -46,6 +46,29 @@ _LABELED_PATTERNS = [
     ("health_plan_number", re.compile(r"Health Plan #:\s*(\S+)")),
     ("license_number", re.compile(r"License #:\s*(\S+)")),
     ("license_number", re.compile(r"DEA #:\s*(\S+)")),
+    # Provider name patterns from clinical note headers
+    ("provider_name", re.compile(r"(?:Provider|Attending|Attending Physician|Surgeon|Ordering Provider|Interpreting Radiologist|Consulting Physician|Therapist|Nurse|ED Physician|Submitting Physician|Prescriber|Ordering Physician|Interpreting provider|Administering nurse|Prescribing Physician Signature|Death certificate completed by|Requesting Provider|Electronically signed|Report electronically signed by|electronically signed by|Signed):\s*([A-Z][a-z]+\s+[A-Z][a-z]+)")),
+    ("provider_name", re.compile(r"(?:From|Sincerely,\n)([A-Z][a-z]+\s+[A-Z][a-z]+)")),
+    # Provider names with title suffix like "Name, MD" or "Name, RN"
+    ("provider_name", re.compile(r"(?:Provider|Attending|Surgeon|Consulting Physician|Therapist|Nurse|ED Physician|Prescriber|Interpreting provider|Administering nurse):\s*(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)(?:,\s*(?:MD|RN|PT|DPT|LCSW|DO))?")),
+]
+
+# Contextual name patterns - extract names that appear after specific labels
+_NAME_CONTEXT_PATTERNS = [
+    # "Provider: FirstName LastName" with optional title
+    ("provider_name", re.compile(r"(?:Provider|Attending|Attending Physician|Surgeon|Ordering Provider|Interpreting Radiologist|Consulting Physician|Therapist|Nurse|ED Physician|Submitting Physician|Prescriber|Ordering Physician|Interpreting provider|Administering nurse|Requesting Provider):\s*(?:Dr\.\s*)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)")),
+    # "Electronically signed: FirstName LastName"
+    ("provider_name", re.compile(r"(?:Electronically signed|Signed|Report electronically signed by|Death certificate completed by|Prescribing Physician Signature):\s*(?:Dr\.\s*)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)")),
+    # "From: FirstName LastName"
+    ("provider_name", re.compile(r"From:\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)")),
+    # "FirstName LastName, MD" standalone on a line or after newline
+    ("provider_name", re.compile(r"\n([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\b")),
+    # "Thank you for your care of FirstName." - this is patient first name
+    ("patient_name", re.compile(r"Thank you for your care of\s+([A-Z][a-z]+)\.")),
+    # Address patterns
+    ("address", re.compile(r"Address:\s*(.+?)(?:\n|$)")),
+    ("address", re.compile(r"Discharge address:\s*(.+?)(?:\n|$)")),
+    ("address", re.compile(r"Address on file:\s*(.+?)(?:\n|$)")),
 ]
 
 # Module-level text cache for passing text from preprocess to postprocess
@@ -91,6 +114,17 @@ def postprocess(entities: list) -> list:
     for label, pattern in _LABELED_PATTERNS:
         for m in pattern.finditer(text):
             # Extract the captured group (the value only)
+            start, end = m.start(1), m.end(1)
+            if not _overlaps(start, end, result):
+                result.append({
+                    "text": m.group(1),
+                    "label": label,
+                    "start": start,
+                    "end": end,
+                })
+
+    for label, pattern in _NAME_CONTEXT_PATTERNS:
+        for m in pattern.finditer(text):
             start, end = m.start(1), m.end(1)
             if not _overlaps(start, end, result):
                 result.append({
