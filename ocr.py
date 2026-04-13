@@ -33,4 +33,13 @@ def _extract_from_pdf(file_bytes: bytes) -> str:
             pages.append(text.strip())
     if pages:
         return "\n\n".join(pages)
-    return ""
+
+    # Fallback: PDF is scanned images — OCR each page
+    from pdf2image import convert_from_bytes
+    images = convert_from_bytes(file_bytes)
+    ocr_pages = []
+    for img in images:
+        text = pytesseract.image_to_string(img).strip()
+        if text:
+            ocr_pages.append(text)
+    return "\n\n".join(ocr_pages)
