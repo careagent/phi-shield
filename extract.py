@@ -215,7 +215,8 @@ def postprocess(entities: list) -> list:
     # For Discharge/Death/Transfer summaries, use full_address.
     first_line = text.split("\n")[0].strip()
     is_full_addr_note = first_line in (
-        "DISCHARGE SUMMARY", "DEATH SUMMARY", "TRANSFER SUMMARY"
+        "DISCHARGE SUMMARY", "DEATH SUMMARY", "TRANSFER SUMMARY",
+        "IMMUNIZATION RECORD"
     )
     is_dual_addr_note = first_line in ("PRESCRIPTION", "DURABLE MEDICAL EQUIPMENT ORDER")
 
