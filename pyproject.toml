@@ -1,0 +1,11 @@
+[project]
+name = "phi-deidentification"
+version = "0.1.0"
+description = "Autoresearch loop for PHI de-identification using GLiNER2"
+requires-python = ">=3.10"
+dependencies = [
+    "gliner2>=1.2.0",
+    "faker>=37.0.0",
+    "urllib3>=2.6.3",
+    "requests>=2.33.1",
+]
