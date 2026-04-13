@@ -62,7 +62,7 @@ _PROVIDER_HEADER_PATTERNS = [
                r"(?:Dr\.\s*)?([A-Z][a-z]+\s+[A-Z][a-z]+)"),
     re.compile(r"From:\s*([A-Z][a-z]+\s+[A-Z][a-z]+)"),
     re.compile(r"\n([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\b"),
-    re.compile(r"— (?:Nephrology|Cardiology|Oncology)\n"),  # won't match names but placeholder
+    re.compile(r"([A-Z][a-z]+\s+[A-Z][a-z]+),\s*(?:MD|RN|PT|DPT|LCSW|DO)\s*—")
 ]
 
 # Words that should not be treated as names
